@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AMPSConfig>
+  <Name>LONDON-1</Name>
+  <Group>UK</Group>
+
+  <Admin>
+    <InetAddr>8185</InetAddr>
+    <Interval>1s</Interval>
+    <FileName>stats.db</FileName> 
+    <SQLTransport>any-ws</SQLTransport>
+  </Admin>
+
+  <Transports>
+      <!-- TCP clients, such as Python/C++/Java/C# -->
+      <Transport>
+          <Name>any-tcp</Name>
+          <Type>tcp</Type>
+          <InetAddr>9107</InetAddr>
+          <Protocol>amps</Protocol>
+      </Transport>
+
+      <!-- JavaScript (websocket) client -->
+      <Transport>
+          <Name>any-ws</Name>
+          <Type>tcp</Type>
+          <InetAddr>9108</InetAddr>
+          <Protocol>websocket</Protocol>
+      </Transport>
+
+      <!-- Inbound Replication connections -->
+      <Transport>
+          <Name>amps-replication</Name>
+          <Type>amps-replication</Type>
+          <InetAddr>9109</InetAddr>
+          <Protocol>amps</Protocol>
+      </Transport>
+  </Transports>
+
+  <Logging>
+      <Target>
+          <Protocol>stdout</Protocol>
+          <Level>error</Level>
+          <IncludeErrors>00-0015</IncludeErrors>
+      </Target>
+
+      <!-- Logging into a file -->
+      <Target>
+          <Protocol>file</Protocol>
+          <Level>trace</Level>
+          <FileName>logs/amps.log</FileName>
+          <RotationThreshold>100MB</RotationThreshold>
+      </Target>
+  </Logging>
+
+  <SOW>
+      <Topic>
+          <Name>customers</Name>
+          <MessageType>json</MessageType>
+          <FileName>sow/%n.sow</FileName>
+
+          <Key>/id</Key>
+      </Topic>
+
+      <Topic>
+          <Name>executions</Name>
+          <MessageType>json</MessageType>
+          <FileName>sow/%n.sow</FileName>
+
+          <Expiration>5d</Expiration>
+
+          <Key>/id</Key>
+      </Topic>
+
+      <Topic>
+          <Name>market_data</Name>
+          <MessageType>json</MessageType>
+          <FileName>sow/%n.sow</FileName>
+          <Expiration>5d</Expiration>
+
+          <Key>/id</Key>
+          <Key>/timestamp</Key>
+      </Topic>
+
+      <View>
+          <Name>customer_positions</Name>
+          <MessageType>json</MessageType>
+
+          <UnderlyingTopic>
+              <Join>[executions]./customer_id = [customers]./id</Join>
+              <Join>[executions]./symbol = [market_data]./symbol</Join>
+          </UnderlyingTopic>
+
+          <Conflation>inline</Conflation>
+
+          <Projection>
+              <Field>[customers]./name</Field>
+              <Field>[customers]./id AS /customer_id</Field>
+              <Field>[executions]./symbol</Field>
+              <Field>SUM([executions]./qty * [executions]./price) / SUM([executions]./qty) AS /vwap</Field>
+              <Field>SUM((([market_data]./ask + [market_data]./bid) / 2 - [executions]./price) * [executions]./qty) AS /profit</Field>
+          </Projection>
+
+          <Grouping>
+              <Field>[customers]./id</Field>
+              <Field>[executions]./symbol</Field>
+          </Grouping>
+      </View>
+
+      <View>
+          <Name>symbol_positions</Name>
+          <MessageType>json</MessageType>
+
+          <UnderlyingTopic>
+              <Join>[executions]./symbol = [market_data]./symbol</Join>
+          </UnderlyingTopic>
+
+          <Conflation>inline</Conflation>
+
+          <Projection>
+              <Field>[executions]./symbol</Field>
+              <Field>SUM([executions]./qty * [executions]./price) / SUM([executions]./qty) AS /vwap</Field>
+              <Field>SUM((([market_data]./ask + [market_data]./bid) / 2 - [executions]./price) * [executions]./qty) AS /profit</Field>
+          </Projection>
+
+          <Grouping>
+              <Field>[executions]./symbol</Field>
+          </Grouping>
+      </View>
+  </SOW>
+
+  <TransactionLog>
+      <JournalDirectory>journals</JournalDirectory>
+      <PreallocatedJournalFiles>1</PreallocatedJournalFiles>
+      <MinJournalSize>50MB</MinJournalSize>
+      <!-- All messages of type JSON will be recorded in the transaction log -->
+      <Topic>
+          <Name>.*</Name>
+          <MessageType>json</MessageType>
+      </Topic>
+  </TransactionLog>
+
+  <Replication>
+      <!-- United States -->
+      <Destination>
+          <Group>US</Group>
+          <Topic>
+              <Name>.*</Name>
+              <MessageType>json</MessageType>
+          </Topic>
+          <SyncType>async</SyncType>
+          <Transport>
+              <Type>amps-replication</Type>
+              <!-- can have more addresses as a group can consist of more than one node -->
+              <InetAddr>9009</InetAddr>
+          </Transport>
+      </Destination>
+
+      <!-- Singapore -->
+      <Destination>
+          <Group>SG</Group>
+          <Topic>
+              <Name>.*</Name>
+              <MessageType>json</MessageType>
+          </Topic>
+          <SyncType>async</SyncType>
+          <Transport>
+              <Type>amps-replication</Type>
+              <!-- can have more addresses as a group can consist of more than one node -->
+              <InetAddr>9209</InetAddr>
+          </Transport>
+      </Destination>
+  </Replication>
+
+  <!-- Transaction log Maintenance - automatically remove journals that are older than a week -->
+  <Actions>
+      <Action>
+          <On>
+              <Module>amps-action-on-schedule</Module>
+              <Options>
+                  <Every>Saturday at 00:30</Every>
+                  <Name>Saturday Night Clean Up</Name>
+              </Options>
+          </On>
+          <Do>
+              <Module>amps-action-do-remove-journal</Module>
+              <Options>
+                  <Age>7d</Age>
+              </Options>
+          </Do>
+      </Action>
+  </Actions>
+</AMPSConfig>
